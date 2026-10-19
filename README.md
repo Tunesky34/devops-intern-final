@@ -69,7 +69,8 @@ The public repository is
 <https://github.com/Tunesky34/devops-intern-final>. The initial implementation
 was merged through [PR #1](https://github.com/Tunesky34/devops-intern-final/pull/1).
 These acceptance fixes were developed as separate conventional commits on a
-`feature/*` branch and are delivered for review as a follow-up pull request.
+`feature/*` branch and merged through
+[PR #2](https://github.com/Tunesky34/devops-intern-final/pull/2).
 The final release is tagged `v1.0.0`.
 
 Useful verification commands:
@@ -166,9 +167,10 @@ Inspect the badge above or list runs with:
 gh run list --repo Tunesky34/devops-intern-final --branch main
 ```
 
-The original workflow passed before these acceptance fixes. The new lint,
-build, test, and publish jobs are exercised by the pull request and subsequent
-main-branch run; check the badge for their current status.
+The original workflow passed before these acceptance fixes. The main-branch
+[CI and publish run](https://github.com/Tunesky34/devops-intern-final/actions/runs/39218581590)
+completed successfully and published the tested image under its full commit
+SHA and `latest` tags. The GHCR package permits anonymous pulls.
 
 ## Task 5 — Nomad deployment
 
@@ -176,23 +178,16 @@ The job registers an HTTP check with Consul, uses a dynamic `http` port mapped
 to container port 8080, and includes rolling update, auto-revert, restart, and
 reschedule policies. Its image tag is an HCL variable.
 
-After the CI publish job has completed and the Nomad client can reach Consul:
+The main-branch workflow published commit
+`fea4280aace9182df2bba2664ed580574f978ecc`. The checked-in job was run against
+local Nomad 1.9.3 and Consul 1.20.2 dev agents:
 
 ```sh
 nomad job validate nomad/nginx-app.nomad.hcl
-nomad job plan -var="image_tag=<commit-sha>" nomad/nginx-app.nomad.hcl
-nomad job run -var="image_tag=<commit-sha>" nomad/nginx-app.nomad.hcl
+nomad job plan -var="image_tag=fea4280aace9182df2bba2664ed580574f978ecc" nomad/nginx-app.nomad.hcl
+nomad job run -var="image_tag=fea4280aace9182df2bba2664ed580574f978ecc" nomad/nginx-app.nomad.hcl
 nomad job status nginx-app
 ```
-
-Replace `<commit-sha>` with the commit SHA whose image was published to GHCR.
-The production job file was validated and planned with Nomad 1.9.3. For
-integration testing, a local Consul 1.20.2 dev agent and a host Nomad 1.9.3
-dev agent were started. Because this branch's GHCR image is not published
-until the main-branch workflow runs, the allocation test used a temporary
-copy of the job with only the image reference changed to the locally built
-`nginx-app:local-compose` image. The checked-in job file and its deployment
-policies were not changed for this test.
 
 ```text
 Job validation successful
@@ -201,16 +196,15 @@ Deployment status: successful
 Task Group  Desired  Placed  Healthy  Unhealthy
 web         1        1       1        0
 
-Allocation deployment health: healthy
-GET /healthz: HTTP 200 (healthy)
-GET /: HTTP 200
+Allocation deployment health: healthy; Consul http-health: passing
+GET /healthz: HTTP 200 (healthy); GET /: HTTP 200
+Build page: fea4280aace9182df2bba2664ed580574f978ecc
 ```
 
-The dynamic allocation port was registered in Consul under `nginx-app`.
-This verifies scheduling, the Docker task, the HTTP health endpoint, and
-Consul registration with the local image. After the main-branch publish
-workflow completes, repeat the run with its published commit-SHA image to
-verify GHCR access and deployment of that exact artifact.
+The allocation pulled the published SHA image from GHCR, used a dynamic port,
+and registered the service and passing HTTP check in Consul. This verifies
+the actual CI-built artifact through registry pull, scheduling, health
+checking, and live HTTP responses.
 
 ## Task 6 — Loki log aggregation
 
@@ -267,12 +261,9 @@ removed only with `docker compose down --volumes`.
 
 ## Known Limitations
 
-- The Nomad job has a verified healthy local-image allocation. The GHCR
-  commit-SHA image is published only after merge to `main`; its registry pull
-  and deployment still need verification after that workflow completes.
-- The main-branch CI must complete before claiming GHCR image publication.
-  Ensure the resulting package is public or configure registry credentials
-  for the Nomad client.
+- Nomad was tested with single-node development agents. A multi-node
+  assessment or production cluster may need additional networking and
+  registry/security configuration.
 - Promtail requires access to the Docker socket and host container-log
   directory; this local setup is not suitable as-is for a hardened production
   environment. Promtail is also a single-instance collector.
