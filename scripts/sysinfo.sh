@@ -7,17 +7,22 @@ print_section() {
 }
 
 print_section "System"
+printf 'Current user: %s\n' "$(id -un)"
+printf 'Effective UID: %s\n' "$(id -u)"
 printf 'Hostname: %s\n' "$(hostname)"
 printf 'Kernel: %s\n' "$(uname -sr)"
 printf 'Architecture: %s\n' "$(uname -m)"
+printf 'System date (ISO-8601): %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')"
 
-print_section "Uptime"
-if [ -r /proc/uptime ]; then
-    awk '{ printf "Uptime: %.0f seconds\n", $1 }' /proc/uptime
-elif command -v uptime >/dev/null 2>&1; then
-    uptime
+print_section "Docker"
+if command -v docker >/dev/null 2>&1; then
+    if docker info >/dev/null 2>&1; then
+        printf 'Docker daemon: running\n'
+    else
+        printf 'Docker daemon: unavailable\n'
+    fi
 else
-    printf 'Uptime information is unavailable.\n'
+    printf 'Docker CLI: not installed\n'
 fi
 
 print_section "Memory"

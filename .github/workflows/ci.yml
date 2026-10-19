@@ -2,20 +2,127 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
-  validate:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Check shell syntax
-        run: sh -n scripts/sysinfo.sh scripts/healthcheck.sh
+      - name: Lint shell scripts
+        run: |
+          docker run --rm \
+            --volume "${PWD}:/mnt" \
+            --workdir /mnt \
+            koalaman/shellcheck:v0.10.0 \
+            -s sh scripts/*.sh
+
+      - name: Lint Dockerfile
+        run: docker run --rm -i hadolint/hadolint:v2.12.0 < app/Dockerfile
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
 
       - name: Build application image
-        run: docker build --tag nginx-app:ci ./app
+        run: |
+          docker build \
+            --build-arg BUILD_SHA="${GITHUB_SHA}" \
+            --tag nginx-app:"${GITHUB_SHA}" \
+            ./app
+
+      - name: Save application image
+        run: docker save nginx-app:"${GITHUB_SHA}" --output /tmp/nginx-app.tar
+
+      - name: Upload application image
+        uses: actions/upload-artifact@v4
+        with:
+          name: nginx-app-image
+          path: /tmp/nginx-app.tar
+          retention-days: 1
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download application image
+        uses: actions/download-artifact@v4
+        with:
+          name: nginx-app-image
+          path: /tmp
+
+      - name: Start application and test endpoints
+        run: |
+          docker load --input /tmp/nginx-app.tar
+          docker run --detach --name nginx-app --publish 8080:8080 \
+            "nginx-app:${GITHUB_SHA}"
+
+          for attempt in $(seq 1 30); do
+            if ./scripts/healthcheck.sh http://localhost:8080/healthz; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs nginx-app
+              exit 1
+            fi
+            sleep 2
+          done
+
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://localhost:8080/)
+          test "$status" = "200"
+
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://localhost:8080/not-found)
+          test "$status" = "404"
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - lint
+      - build
+      - test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download application image
+        uses: actions/download-artifact@v4
+        with:
+          name: nginx-app-image
+          path: /tmp
+
+      - name: Load and tag application image
+        run: |
+          docker load --input /tmp/nginx-app.tar
+          docker tag "nginx-app:${GITHUB_SHA}" \
+            "ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
+          docker tag "nginx-app:${GITHUB_SHA}" \
+            "ghcr.io/${GITHUB_REPOSITORY,,}:latest"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish commit and latest tags
+        run: |
+          docker push "ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
+          docker push "ghcr.io/${GITHUB_REPOSITORY,,}:latest"
