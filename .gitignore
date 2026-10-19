@@ -11,8 +11,3 @@
 .DS_Store
 .vscode/
 .idea/
-
-# Local screenshot artifacts
-docs/screenshots/*.png
-docs/screenshots/*.jpg
-docs/screenshots/*.jpeg

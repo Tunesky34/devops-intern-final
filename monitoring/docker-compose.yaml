@@ -1,4 +1,16 @@
 services:
+  nginx-app:
+    build:
+      context: ../app
+      args:
+        BUILD_SHA: local-compose
+    image: nginx-app:local-compose
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    labels:
+      promtail.scrape: "true"
+    restart: unless-stopped
+
   loki:
     image: grafana/loki:3.1.1
     command: -config.file=/etc/loki/loki-config.yaml
@@ -12,8 +24,7 @@ services:
   promtail:
     image: grafana/promtail:3.1.1
     command: -config.file=/etc/promtail/promtail-config.yaml
-    environment:
-      HOSTNAME: ${HOSTNAME:-localhost}
+    user: "0:0"
     volumes:
       - ./promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
@@ -22,5 +33,20 @@ services:
       - loki
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: dev-only-change-me
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/loki.yaml:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
+
 volumes:
+  grafana-data:
   loki-data:
